@@ -22,6 +22,7 @@ import {
 import { signalingHub, SignalMessage } from './utils/signaling';
 import { soundManager } from './utils/audio';
 import { WebRTCManager } from './utils/webrtc';
+import { Bell, Monitor, Share2, X } from 'lucide-react';
 
 const DEFAULT_PERMISSIONS: SessionPermissions = {
   allowControl: true,
@@ -66,6 +67,9 @@ export default function App() {
   const [localScreenStream, setLocalScreenStream] = useState<MediaStream | null>(null);
   const [remoteScreenStream, setRemoteScreenStream] = useState<MediaStream | null>(null);
 
+  // Incoming client alert modal on Host side
+  const [incomingClientPrompt, setIncomingClientPrompt] = useState(false);
+
   // WebRTC Instance Ref
   const webrtcRef = useRef<WebRTCManager | null>(null);
 
@@ -73,8 +77,8 @@ export default function App() {
   const [metrics, setMetrics] = useState<SystemMetrics>(INITIAL_METRICS);
   const [auditLogs, setAuditLogs] = useState<string[]>([
     'OmniDesk Remote Subsystem active.',
-    'Google STUN Server NAT traversal ready (stun:stun.l.google.com:19302).',
-    'Direct End-to-End Encryption enabled.',
+    'PeerJS Global WebRTC Signaling Ready.',
+    'Google STUN Server NAT traversal active (stun:stun.l.google.com:19302).',
   ]);
 
   // Chat & Clipboard
@@ -83,7 +87,7 @@ export default function App() {
       id: '1',
       sender: 'system',
       senderName: 'OmniDesk Relay',
-      text: 'Secure session established. Screen sharing channel is open.',
+      text: 'Secure session established. Peer-to-peer channel is active.',
       timestamp: 'Just now',
     },
   ]);
@@ -95,7 +99,9 @@ export default function App() {
   const [chatOpen, setChatOpen] = useState(false);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
 
-  // Parse URL on mount: if URL has session parameter, auto-connect to remote screen!
+  // Parse URL on mount:
+  // If URL has session parameter -> THIS DEVICE IS THE REMOTE VIEWER (CLIENT)
+  // If URL does NOT have session parameter -> THIS DEVICE IS THE HOST
   useEffect(() => {
     try {
       const params = new URLSearchParams(window.location.search);
@@ -103,22 +109,24 @@ export default function App() {
       const urlPin = params.get('pin');
 
       if (urlSession) {
+        // CLIENT MODE: Connect to remote host
         setTargetDeviceId(urlSession);
         if (urlPin) setTargetPin(urlPin);
         
-        // Auto connect & take remote screen!
         setViewState('remote_viewer');
         soundManager.playConnectChime();
-
-        // Initialize WebRTC as Client
         initWebRTCClient(urlSession);
+      } else {
+        // HOST MODE: Initialize Host PeerJS immediately so host is online and waiting!
+        initWebRTCHost();
       }
     } catch {
-      // ignore
+      // fallback
+      initWebRTCHost();
     }
   }, []);
 
-  // Listen to peer signals across tabs/windows
+  // Listen to peer signals across tabs/windows (for same-machine multi-tab testing)
   useEffect(() => {
     const unsubscribe = signalingHub.subscribe((msg: SignalMessage) => {
       if (msg.type === 'HOST_SCREEN_STARTED') {
@@ -151,6 +159,34 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
+  // ================= HOST INITIALIZATION =================
+  const initWebRTCHost = (stream?: MediaStream | null) => {
+    if (webrtcRef.current) webrtcRef.current.destroy();
+
+    const cleanId = hostSession.deviceId.replace(/-/g, '');
+    webrtcRef.current = new WebRTCManager('host', cleanId, {
+      onStatusChange: (status, details) => {
+        if (status === 'client_connected') {
+          soundManager.playNotification();
+          setAuditLogs(prev => [`Remote client connected from public network!`, ...prev]);
+          setIncomingClientPrompt(true);
+        }
+      },
+      onHostNeedScreen: () => {
+        soundManager.playNotification();
+        setIncomingClientPrompt(true);
+      },
+      onDataMessage: (data) => {
+        if (data.type === 'CHAT') {
+          setMessages(prev => [...prev, data.message]);
+        }
+      },
+    });
+
+    webrtcRef.current.initHost(stream || localScreenStream);
+  };
+
+  // ================= CLIENT INITIALIZATION =================
   const initWebRTCClient = (sessionId: string) => {
     if (webrtcRef.current) webrtcRef.current.destroy();
 
@@ -158,9 +194,10 @@ export default function App() {
       onRemoteStream: (stream) => {
         setRemoteScreenStream(stream);
         soundManager.playConnectChime();
+        setAuditLogs(prev => ['Remote video stream received. Real-time screen active.', ...prev]);
       },
       onStatusChange: (status) => {
-        setAuditLogs(prev => [`WebRTC state: ${status}`, ...prev]);
+        setAuditLogs(prev => [`WebRTC connection status: ${status}`, ...prev]);
       },
       onDataMessage: (data) => {
         if (data.type === 'CHAT') {
@@ -172,7 +209,7 @@ export default function App() {
     webrtcRef.current.initClient();
   };
 
-  // Start real browser screen capture
+  // Start real browser screen capture on Host
   const handleStartScreenShare = async () => {
     try {
       if (!navigator.mediaDevices?.getDisplayMedia) {
@@ -190,18 +227,25 @@ export default function App() {
 
       setLocalScreenStream(stream);
       setHostSession(prev => ({ ...prev, isSharingScreen: true }));
+      setIncomingClientPrompt(false);
       soundManager.playConnectChime();
-      setAuditLogs(prev => ['Screen capture started. Live stream active.', ...prev]);
+      setAuditLogs(prev => ['Screen capture active. Broadcasting to connected peers.', ...prev]);
 
-      // If user started from landing or host, ensure webrtc host is initialized
-      const cleanId = hostSession.deviceId.replace(/-/g, '');
-      if (webrtcRef.current) webrtcRef.current.destroy();
-      webrtcRef.current = new WebRTCManager('host', cleanId, {
-        onStatusChange: (st) => console.log('Host WebRTC status:', st),
+      // Push stream to WebRTC manager
+      if (webrtcRef.current) {
+        webrtcRef.current.updateHostStream(stream);
+      } else {
+        initWebRTCHost(stream);
+      }
+
+      // Relay via BroadcastChannel for multi-tab
+      signalingHub.send({
+        type: 'HOST_SCREEN_STARTED',
+        deviceId: hostSession.deviceId,
+        sender: 'host',
       });
-      webrtcRef.current.initHost(stream);
 
-      // Handle user stopping screen share via browser stop button
+      // Handle user stopping screen share via browser floating bar
       stream.getVideoTracks()[0].onended = () => {
         handleStopScreenShare();
       };
@@ -217,7 +261,7 @@ export default function App() {
     }
     setHostSession(prev => ({ ...prev, isSharingScreen: false }));
     soundManager.playDisconnectChime();
-    setAuditLogs(prev => ['Screen sharing stopped.', ...prev]);
+    setAuditLogs(prev => ['Screen sharing broadcast stopped.', ...prev]);
   };
 
   // Connect via Method 2 (Unique Code)
@@ -245,6 +289,9 @@ export default function App() {
     setRemoteScreenStream(null);
     setViewState('landing');
     soundManager.playDisconnectChime();
+
+    // Re-initialize Host peer on landing
+    initWebRTCHost();
   };
 
   // Chat message send
@@ -370,6 +417,38 @@ export default function App() {
           />
         )}
       </main>
+
+      {/* Host Incoming Client Alert Modal */}
+      {incomingClientPrompt && !hostSession.isSharingScreen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-2xl bg-slate-900 border border-cyan-500/50 p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95">
+            <div className="w-12 h-12 rounded-2xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center mx-auto">
+              <Bell className="w-6 h-6 animate-bounce" />
+            </div>
+            <div className="text-center space-y-1">
+              <h3 className="text-lg font-bold text-white">Remote User Connected!</h3>
+              <p className="text-xs text-slate-300">
+                A remote user has connected via your Access URL or Code. Click below to choose which screen or window to stream to them.
+              </p>
+            </div>
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => setIncomingClientPrompt(false)}
+                className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition"
+              >
+                Dismiss
+              </button>
+              <button
+                onClick={handleStartScreenShare}
+                className="flex-1 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-lg shadow-cyan-950/50 transition"
+              >
+                <Monitor className="w-4 h-4" />
+                <span>Share Screen Now</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* File Transfer Modal */}
       <FileTransferModal

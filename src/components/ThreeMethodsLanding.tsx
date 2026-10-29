@@ -10,9 +10,9 @@ import {
   ShieldCheck,
   Radio,
   Share2,
-  Lock,
   Sparkles,
-  Laptop
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react';
 import { soundManager } from '../utils/audio';
 
@@ -48,7 +48,7 @@ export const ThreeMethodsLanding: React.FC<ThreeMethodsLandingProps> = ({
   const rawId = deviceId.replace(/-/g, '');
   const shareUrl = typeof window !== 'undefined'
     ? `${window.location.origin}${window.location.pathname}?session=${rawId}&pin=${pin}`
-    : `https://app/?session=${rawId}&pin=${pin}`;
+    : `https://techrescue.in/?session=${rawId}&pin=${pin}`;
 
   const copyUrl = () => {
     navigator.clipboard.writeText(shareUrl);
@@ -71,6 +71,24 @@ export const ThreeMethodsLanding: React.FC<ThreeMethodsLandingProps> = ({
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8 sm:py-12 space-y-10 font-sans">
+      {/* Top Banner if Screen is Already Sharing */}
+      {isSharingScreen ? (
+        <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between text-xs text-emerald-300">
+          <div className="flex items-center gap-3">
+            <span className="w-3 h-3 rounded-full bg-emerald-400 animate-ping"></span>
+            <span className="font-semibold text-sm">
+              Host Screen is Actively Broadcasting! Anyone opening your URL or code will see your live desktop instantly.
+            </span>
+          </div>
+          <button
+            onClick={onStartHostScreenShare}
+            className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-semibold transition"
+          >
+            Stop Sharing
+          </button>
+        </div>
+      ) : null}
+
       {/* Hero Title */}
       <div className="text-center space-y-3">
         <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs font-mono font-medium">
@@ -95,7 +113,7 @@ export const ThreeMethodsLanding: React.FC<ThreeMethodsLandingProps> = ({
                 01
               </span>
               <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800">
-                Any Network
+                Any Network / Device
               </span>
             </div>
 
@@ -105,7 +123,7 @@ export const ThreeMethodsLanding: React.FC<ThreeMethodsLandingProps> = ({
                 <h3 className="text-lg font-bold text-white">Generate Remote URL</h3>
               </div>
               <p className="text-xs text-slate-400 leading-relaxed">
-                Send this link to ANY system (phone, laptop, or desktop). Opening this link instantly connects to this machine's screen.
+                Send this link to ANY system (phone, laptop, or PC). Opening this link instantly connects to this machine's screen.
               </p>
             </div>
 
@@ -117,6 +135,24 @@ export const ThreeMethodsLanding: React.FC<ThreeMethodsLandingProps> = ({
               <div className="font-mono text-xs text-cyan-300 break-all bg-slate-900/80 p-2 rounded border border-slate-800 select-all">
                 {shareUrl}
               </div>
+            </div>
+
+            {/* Screen sharing status indicator */}
+            <div className="pt-1">
+              {!isSharingScreen ? (
+                <button
+                  onClick={onStartHostScreenShare}
+                  className="w-full py-2 px-3 rounded-xl bg-cyan-950/70 border border-cyan-500/40 text-cyan-300 hover:bg-cyan-900/60 font-semibold text-xs flex items-center justify-center gap-2 transition"
+                >
+                  <Share2 className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Start Screen Share (for URL)</span>
+                </button>
+              ) : (
+                <div className="flex items-center gap-2 text-xs text-emerald-400 font-semibold px-2 py-1 bg-emerald-950/50 rounded-lg border border-emerald-800/60">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Screen is broadcasting live!
+                </div>
+              )}
             </div>
           </div>
 
@@ -222,7 +258,7 @@ export const ThreeMethodsLanding: React.FC<ThreeMethodsLandingProps> = ({
                 <h3 className="text-lg font-bold text-white">Share My Screen</h3>
               </div>
               <p className="text-xs text-slate-400 leading-relaxed">
-                Allow a remote user to take control of this computer. Captures entire desktop, window, or tab with audio.
+                Allow a remote user to view and control this computer. Captures entire desktop, window, or tab with audio.
               </p>
             </div>
 
