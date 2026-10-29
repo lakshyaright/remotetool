@@ -1,0 +1,8 @@
+{
+  "name": "OmniDesk Remote",
+  "description": "Secure web-based remote desktop access, screen sharing, and IT support platform with real-time peer connection, interactive controls, and system telemetry.",
+  "requestFramePermissions": [
+    "display-capture"
+  ],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
